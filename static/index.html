@@ -96,10 +96,12 @@
     box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
   }
   input[type="range"]:disabled { cursor: default; opacity: 0.8; }
-  .slider-note { font-size: .78rem; color: var(--muted); margin-top: -4px; }
+  .slider-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .slider-row input[type="range"] { flex: 1; min-width: 0; }
   .subtasks { list-style: none; margin: 12px 0 0; padding: 0; }
   .subtask-row { padding: 8px 0 0; border-top: 1px solid var(--line); }
   .sub-top { display: flex; align-items: center; gap: 8px; }
+  .sub-check { width: 20px; height: 20px; accent-color: var(--accent); flex-shrink: 0; }
   .sub-title { flex: 1; }
   .subtask-row.done .sub-title { text-decoration: line-through; color: var(--muted); }
   .sub-pct { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; font-size: .9rem; }
@@ -159,15 +161,20 @@ function render() {
   }
   el.innerHTML = list.map(t => {
     const hasSubs = t.subtasks.length > 0;
-    // Tasks with subtasks show a read-only status slider driven by the
-    // subtasks; tasks without subtasks get a draggable slider.
+    // One control per task: a read-only status bar when there are subtasks
+    // (driven by them), otherwise the draggable slider.
     const headChecked = hasSubs ? t.forced : t.done;
     const headTitle = hasSubs ? 'Force to 100%' : 'Mark done';
-    const slider = hasSubs
-      ? `<input type="range" min="0" max="100" value="${t.progress}" disabled aria-label="Overall progress">`
-        + `<div class="slider-note">Overall progress from subtasks${t.forced ? ' · forced to 100%' : ''}</div>`
-      : `<input type="range" min="0" max="100" value="${t.progress}" aria-label="Set progress"
-           oninput="previewTaskProgress(${t.id}, this)" onchange="commitTaskProgress(${t.id}, this.value)">`;
+    const progressControl = hasSubs
+      ? `<div class="progress-row">
+           <div class="bar"><div style="width:${t.progress}%"></div></div>
+           <span class="pct">${t.progress}%</span>
+         </div>`
+      : `<div class="slider-row">
+           <input type="range" min="0" max="100" value="${t.progress}" aria-label="Set progress"
+             oninput="previewTaskProgress(${t.id}, this)" onchange="commitTaskProgress(${t.id}, this.value)">
+           <span class="pct" id="pct-${t.id}">${t.progress}%</span>
+         </div>`;
     return `
     <div class="task ${t.done ? 'done-task' : ''}" data-id="${t.id}">
       <div class="task-head">
@@ -175,15 +182,12 @@ function render() {
         <span class="task-title ${t.done ? 'done' : ''}" ondblclick="renameTask(${t.id})" title="Double-click to rename">${esc(t.title)}</span>
         <button class="ghost danger" onclick="deleteTask(${t.id})">Delete</button>
       </div>
-      <div class="progress-row">
-        <div class="bar"><div style="width:${t.progress}%"></div></div>
-        <span class="pct">${t.progress}%</span>
-      </div>
-      ${slider}
+      ${progressControl}
       <ul class="subtasks">
         ${t.subtasks.map(s => `
           <li class="subtask-row ${s.progress === 100 ? 'done' : ''}">
             <div class="sub-top">
+              <input type="checkbox" class="sub-check" ${s.progress === 100 ? 'checked' : ''} onchange="toggleSubCheck(${s.id}, this.checked, this)" title="Mark done">
               <span class="sub-title" ondblclick="renameSub(${s.id})" title="Double-click to rename">${esc(s.title)}</span>
               <span class="sub-pct" id="subpct-${s.id}">${s.progress}%</span>
               <button class="ghost danger" onclick="deleteSub(${s.id})">✕</button>
@@ -203,10 +207,7 @@ function render() {
 // Live preview while dragging (no re-render, so the drag never stutters);
 // the value is saved when the drag ends.
 function previewTaskProgress(id, input) {
-  const card = input.closest('.task');
-  const v = Number(input.value);
-  card.querySelector('.bar > div').style.width = v + '%';
-  card.querySelector('.pct').textContent = v + '%';
+  document.getElementById('pct-' + id).textContent = input.value + '%';
 }
 async function commitTaskProgress(id, val) {
   const t = await api('/api/tasks/' + id, 'PATCH', {progress: Number(val)});
@@ -214,10 +215,18 @@ async function commitTaskProgress(id, val) {
   render();
 }
 function previewSubProgress(subId, input) {
-  document.getElementById('subpct-' + subId).textContent = input.value + '%';
+  const v = Number(input.value);
+  document.getElementById('subpct-' + subId).textContent = v + '%';
+  const box = input.closest('.subtask-row').querySelector('.sub-check');
+  if (box) box.checked = (v === 100);
 }
 async function commitSubProgress(subId, val) {
   await api('/api/subtasks/' + subId, 'PATCH', {progress: Number(val)});
+  await refresh();
+}
+// Subtask checkbox is a shortcut: check -> 100%, uncheck -> 0%.
+async function toggleSubCheck(id, checked) {
+  await api('/api/subtasks/' + id, 'PATCH', {progress: checked ? 100 : 0});
   await refresh();
 }
 async function toggleHead(id, checked, hasSubs) {
