@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Tracker</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1c1e21; --muted: #6b7280;
+    --line: #e5e7eb; --accent: #2563eb; --accent-soft: #dbeafe;
+    --danger: #dc2626; --bar: #e5e7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --card: #1b1f26; --text: #e8eaed; --muted: #9aa0a6;
+      --line: #2d333b; --accent: #60a5fa; --accent-soft: #1e3a5f;
+      --danger: #f87171; --bar: #2d333b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--text);
+  }
+  header { padding: 20px 16px 8px; max-width: 720px; margin: 0 auto; }
+  header h1 { margin: 0; font-size: 1.5rem; }
+  main { max-width: 720px; margin: 0 auto; padding: 8px 16px 48px; }
+  #add-task-form { display: flex; gap: 8px; margin: 12px 0; }
+  input[type="text"] {
+    flex: 1; padding: 10px 12px; font-size: 1rem; border: 1px solid var(--line);
+    border-radius: 10px; background: var(--card); color: var(--text);
+  }
+  button {
+    padding: 10px 16px; font-size: 1rem; border: none; border-radius: 10px;
+    background: var(--accent); color: #fff; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--muted); padding: 6px 8px; font-size: .85rem; }
+  button.ghost.danger { color: var(--danger); }
+  #filters { display: flex; gap: 8px; margin: 4px 0 16px; }
+  #filters button { background: var(--card); color: var(--muted); border: 1px solid var(--line); }
+  #filters button.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .task {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  .task.done-task { opacity: .65; }
+  .task-head { display: flex; align-items: center; gap: 8px; }
+  .task-title { flex: 1; font-weight: 600; font-size: 1.05rem; }
+  .task-title.done { text-decoration: line-through; color: var(--muted); }
+  .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .bar { flex: 1; height: 10px; background: var(--bar); border-radius: 6px; overflow: hidden; }
+  .bar > div { height: 100%; background: var(--accent); border-radius: 6px; transition: width .2s; }
+  .pct { min-width: 48px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+  input[type="range"] { width: 100%; margin-top: 8px; accent-color: var(--accent); }
+  .subtasks { list-style: none; margin: 10px 0 0; padding: 0; }
+  .subtasks li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .subtasks li span { flex: 1; }
+  .subtasks li.done span { text-decoration: line-through; color: var(--muted); }
+  .subtasks input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+  .add-sub { display: flex; gap: 8px; margin-top: 8px; }
+  .add-sub input { font-size: .9rem; padding: 8px 10px; }
+  .add-sub button { font-size: .9rem; padding: 8px 12px; }
+  .empty { text-align: center; color: var(--muted); padding: 40px 0; }
+</style>
+</head>
+<body>
+<header><h1>Task Tracker</h1></header>
+<main>
+  <form id="add-task-form">
+    <input type="text" id="new-task-title" placeholder="What are you working on?" autocomplete="off">
+    <button type="submit">Add</button>
+  </form>
+  <nav id="filters">
+    <button data-filter="active" class="on">Active</button>
+    <button data-filter="all">All</button>
+    <button data-filter="done">Done</button>
+  </nav>
+  <div id="tasks"></div>
+</main>
+<script>
+const esc = s => s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let tasks = [];
+let filter = 'active';
+
+async function api(path, method = 'GET', body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? {'Content-Type': 'application/json'} : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) throw new Error('request failed');
+  return res.json();
+}
+
+async function refresh() {
+  tasks = await api('/api/tasks');
+  render();
+}
+
+function visible(t) {
+  if (filter === 'active') return !t.done;
+  if (filter === 'done') return t.done;
+  return true;
+}
+
+function render() {
+  const el = document.getElementById('tasks');
+  const list = tasks.filter(visible);
+  if (!list.length) {
+    el.innerHTML = '<div class="empty">Nothing here yet. Add something you\'re working on above.</div>';
+    return;
+  }
+  el.innerHTML = list.map(t => `
+    <div class="task ${t.done ? 'done-task' : ''}" data-id="${t.id}">
+      <div class="task-head">
+        <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleDone(${t.id}, this.checked)" title="Mark done">
+        <span class="task-title ${t.done ? 'done' : ''}" ondblclick="renameTask(${t.id})" title="Double-click to rename">${esc(t.title)}</span>
+        <button class="ghost danger" onclick="deleteTask(${t.id})">Delete</button>
+      </div>
+      <div class="progress-row">
+        <div class="bar"><div style="width:${t.progress}%"></div></div>
+        <span class="pct">${t.progress}%</span>
+      </div>
+      <input type="range" min="0" max="100" value="${t.progress}" oninput="setProgress(${t.id}, this.value)">
+      <ul class="subtasks">
+        ${t.subtasks.map(s => `
+          <li class="${s.done ? 'done' : ''}">
+            <input type="checkbox" ${s.done ? 'checked' : ''} onchange="toggleSub(${s.id}, this.checked)">
+            <span ondblclick="renameSub(${s.id})" title="Double-click to rename">${esc(s.title)}</span>
+            <button class="ghost danger" onclick="deleteSub(${s.id})">✕</button>
+          </li>`).join('')}
+      </ul>
+      <form class="add-sub" onsubmit="return addSub(event, ${t.id})">
+        <input type="text" placeholder="Add a subtask…" autocomplete="off">
+        <button type="submit">Add</button>
+      </form>
+    </div>`).join('');
+}
+
+async function setProgress(id, val) {
+  const t = await api('/api/tasks/' + id, 'PATCH', {progress: Number(val)});
+  tasks = tasks.map(x => x.id === id ? t : x);
+  render();
+}
+async function toggleDone(id, done) {
+  const t = await api('/api/tasks/' + id, 'PATCH', {done});
+  tasks = tasks.map(x => x.id === id ? t : x);
+  render();
+}
+async function renameTask(id) {
+  const t = tasks.find(x => x.id === id);
+  const title = prompt('Rename task:', t.title);
+  if (title && title.trim() && title.trim() !== t.title) {
+    const updated = await api('/api/tasks/' + id, 'PATCH', {title: title.trim()});
+    tasks = tasks.map(x => x.id === id ? updated : x);
+    render();
+  }
+}
+async function deleteTask(id) {
+  if (!confirm('Delete this task and its subtasks?')) return;
+  await api('/api/tasks/' + id, 'DELETE');
+  tasks = tasks.filter(x => x.id !== id);
+  render();
+}
+async function addSub(e, taskId) {
+  e.preventDefault();
+  const input = e.target.querySelector('input');
+  const title = input.value.trim();
+  if (!title) return false;
+  await api('/api/tasks/' + taskId + '/subtasks', 'POST', {title});
+  await refresh();
+  return false;
+}
+async function toggleSub(id, done) {
+  await api('/api/subtasks/' + id, 'PATCH', {done});
+  await refresh();
+}
+async function renameSub(id) {
+  const title = prompt('Rename subtask:');
+  if (title && title.trim()) {
+    await api('/api/subtasks/' + id, 'PATCH', {title: title.trim()});
+    await refresh();
+  }
+}
+async function deleteSub(id) {
+  await api('/api/subtasks/' + id, 'DELETE');
+  await refresh();
+}
+
+document.getElementById('add-task-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const input = document.getElementById('new-task-title');
+  const title = input.value.trim();
+  if (!title) return;
+  const t = await api('/api/tasks', 'POST', {title});
+  tasks.unshift(t);
+  input.value = '';
+  render();
+});
+document.getElementById('filters').addEventListener('click', e => {
+  if (e.target.dataset.filter) {
+    filter = e.target.dataset.filter;
+    document.querySelectorAll('#filters button').forEach(b => b.classList.toggle('on', b === e.target));
+    render();
+  }
+});
+
+refresh();
+</script>
+</body>
+</html>
