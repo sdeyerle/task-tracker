@@ -45,18 +45,65 @@
   }
   .task.done-task { opacity: .65; }
   .task-head { display: flex; align-items: center; gap: 8px; }
+  .head-check { width: 20px; height: 20px; accent-color: var(--accent); flex-shrink: 0; }
   .task-title { flex: 1; font-weight: 600; font-size: 1.05rem; }
   .task-title.done { text-decoration: line-through; color: var(--muted); }
   .progress-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
   .bar { flex: 1; height: 10px; background: var(--bar); border-radius: 6px; overflow: hidden; }
   .bar > div { height: 100%; background: var(--accent); border-radius: 6px; transition: width .2s; }
   .pct { min-width: 48px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
-  input[type="range"] { width: 100%; margin-top: 8px; accent-color: var(--accent); }
-  .subtasks { list-style: none; margin: 10px 0 0; padding: 0; }
-  .subtasks li { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); }
-  .subtasks li span { flex: 1; }
-  .subtasks li.done span { text-decoration: line-through; color: var(--muted); }
-  .subtasks input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--accent); }
+  /* Big, touch-friendly sliders. Horizontal drags are captured by the slider
+     (touch-action: pan-y) so the page doesn't scroll mid-drag. The value is
+     previewed live and saved when the drag ends, so dragging never stutters. */
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 44px;
+    background: transparent;
+    margin: 2px 0 0;
+    touch-action: pan-y;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 12px;
+    border-radius: 7px;
+    background: var(--bar);
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-top: -10px;
+    border: none;
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+  }
+  input[type="range"]::-moz-range-track {
+    height: 12px;
+    border-radius: 7px;
+    background: var(--bar);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: none;
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.3);
+  }
+  input[type="range"]:disabled { cursor: default; opacity: 0.8; }
+  .slider-note { font-size: .78rem; color: var(--muted); margin-top: -4px; }
+  .subtasks { list-style: none; margin: 12px 0 0; padding: 0; }
+  .subtask-row { padding: 8px 0 0; border-top: 1px solid var(--line); }
+  .sub-top { display: flex; align-items: center; gap: 8px; }
+  .sub-title { flex: 1; }
+  .subtask-row.done .sub-title { text-decoration: line-through; color: var(--muted); }
+  .sub-pct { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; font-size: .9rem; }
+  .sub-slider { height: 38px; }
   .add-sub { display: flex; gap: 8px; margin-top: 8px; }
   .add-sub input { font-size: .9rem; padding: 8px 10px; }
   .add-sub button { font-size: .9rem; padding: 8px 12px; }
@@ -110,10 +157,21 @@ function render() {
     el.innerHTML = '<div class="empty">Nothing here yet. Add something you\'re working on above.</div>';
     return;
   }
-  el.innerHTML = list.map(t => `
+  el.innerHTML = list.map(t => {
+    const hasSubs = t.subtasks.length > 0;
+    // Tasks with subtasks show a read-only status slider driven by the
+    // subtasks; tasks without subtasks get a draggable slider.
+    const headChecked = hasSubs ? t.forced : t.done;
+    const headTitle = hasSubs ? 'Force to 100%' : 'Mark done';
+    const slider = hasSubs
+      ? `<input type="range" min="0" max="100" value="${t.progress}" disabled aria-label="Overall progress">`
+        + `<div class="slider-note">Overall progress from subtasks${t.forced ? ' · forced to 100%' : ''}</div>`
+      : `<input type="range" min="0" max="100" value="${t.progress}" aria-label="Set progress"
+           oninput="previewTaskProgress(${t.id}, this)" onchange="commitTaskProgress(${t.id}, this.value)">`;
+    return `
     <div class="task ${t.done ? 'done-task' : ''}" data-id="${t.id}">
       <div class="task-head">
-        <input type="checkbox" ${t.done ? 'checked' : ''} onchange="toggleDone(${t.id}, this.checked)" title="Mark done">
+        <input type="checkbox" class="head-check" ${headChecked ? 'checked' : ''} onchange="toggleHead(${t.id}, this.checked, ${hasSubs})" title="${headTitle}">
         <span class="task-title ${t.done ? 'done' : ''}" ondblclick="renameTask(${t.id})" title="Double-click to rename">${esc(t.title)}</span>
         <button class="ghost danger" onclick="deleteTask(${t.id})">Delete</button>
       </div>
@@ -121,29 +179,49 @@ function render() {
         <div class="bar"><div style="width:${t.progress}%"></div></div>
         <span class="pct">${t.progress}%</span>
       </div>
-      <input type="range" min="0" max="100" value="${t.progress}" oninput="setProgress(${t.id}, this.value)">
+      ${slider}
       <ul class="subtasks">
         ${t.subtasks.map(s => `
-          <li class="${s.done ? 'done' : ''}">
-            <input type="checkbox" ${s.done ? 'checked' : ''} onchange="toggleSub(${s.id}, this.checked)">
-            <span ondblclick="renameSub(${s.id})" title="Double-click to rename">${esc(s.title)}</span>
-            <button class="ghost danger" onclick="deleteSub(${s.id})">✕</button>
+          <li class="subtask-row ${s.progress === 100 ? 'done' : ''}">
+            <div class="sub-top">
+              <span class="sub-title" ondblclick="renameSub(${s.id})" title="Double-click to rename">${esc(s.title)}</span>
+              <span class="sub-pct" id="subpct-${s.id}">${s.progress}%</span>
+              <button class="ghost danger" onclick="deleteSub(${s.id})">✕</button>
+            </div>
+            <input type="range" class="sub-slider" min="0" max="100" value="${s.progress}" aria-label="Subtask progress"
+              oninput="previewSubProgress(${s.id}, this)" onchange="commitSubProgress(${s.id}, this.value)">
           </li>`).join('')}
       </ul>
       <form class="add-sub" onsubmit="return addSub(event, ${t.id})">
         <input type="text" placeholder="Add a subtask…" autocomplete="off">
         <button type="submit">Add</button>
       </form>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
-async function setProgress(id, val) {
+// Live preview while dragging (no re-render, so the drag never stutters);
+// the value is saved when the drag ends.
+function previewTaskProgress(id, input) {
+  const card = input.closest('.task');
+  const v = Number(input.value);
+  card.querySelector('.bar > div').style.width = v + '%';
+  card.querySelector('.pct').textContent = v + '%';
+}
+async function commitTaskProgress(id, val) {
   const t = await api('/api/tasks/' + id, 'PATCH', {progress: Number(val)});
   tasks = tasks.map(x => x.id === id ? t : x);
   render();
 }
-async function toggleDone(id, done) {
-  const t = await api('/api/tasks/' + id, 'PATCH', {done});
+function previewSubProgress(subId, input) {
+  document.getElementById('subpct-' + subId).textContent = input.value + '%';
+}
+async function commitSubProgress(subId, val) {
+  await api('/api/subtasks/' + subId, 'PATCH', {progress: Number(val)});
+  await refresh();
+}
+async function toggleHead(id, checked, hasSubs) {
+  const t = await api('/api/tasks/' + id, 'PATCH', hasSubs ? {forced: checked} : {done: checked});
   tasks = tasks.map(x => x.id === id ? t : x);
   render();
 }
@@ -170,10 +248,6 @@ async function addSub(e, taskId) {
   await api('/api/tasks/' + taskId + '/subtasks', 'POST', {title});
   await refresh();
   return false;
-}
-async function toggleSub(id, done) {
-  await api('/api/subtasks/' + id, 'PATCH', {done});
-  await refresh();
 }
 async function renameSub(id) {
   const title = prompt('Rename subtask:');
