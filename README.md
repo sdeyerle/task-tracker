@@ -4,6 +4,13 @@ A little web app for tracking what you're working on: add tasks, break them
 into subtasks, and track percentage complete. Data is stored in a local
 SQLite database (`tasks.db`, created automatically on first run).
 
+## Try it in GitHub Codespaces
+
+Click **Code → Codespaces → Create codespace on main**. The dev container
+installs dependencies and starts the app automatically — it opens in a
+preview tab once the port forwards. Data saves to SQLite inside the
+codespace for as long as the codespace exists.
+
 ## Run locally
 
 ```bash
