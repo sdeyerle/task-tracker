@@ -1,0 +1,1 @@
+{"forwardPorts":[5000],"image":"mcr.microsoft.com/devcontainers/python:3.12","name":"Task Tracker","portsAttributes":{"5000":{"label":"Task Tracker","onAutoForward":"openPreview"}},"postCreateCommand":"pip install -r requirements.txt","postStartCommand":"nohup python app.py > /tmp/task-tracker.log 2>&1 &"}
